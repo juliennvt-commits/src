@@ -16,14 +16,15 @@ def main():
         parameter_overrides=[Parameter("use_sim_time", Parameter.Type.BOOL, True)]
     )
     
-    # Utilisation d'un exécuteur simple pour éviter les erreurs d'index
+    # Utilisation du SingleThreadedExecutor pour la stabilité
     executor = rclpy.executors.SingleThreadedExecutor()
     executor.add_node(node)
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
 
     print("--- DÉMARRAGE DU SCRIPT ---")
-    time.sleep(3.0) 
+    print("Vérification de la connexion Gazebo/MoveIt... (5s)")
+    time.sleep(5.0) 
 
     arm = MoveIt2(
         node=node,
@@ -34,16 +35,11 @@ def main():
         group_name="ur3e",
     )
     
-    # Réglages de souplesse pour la validation MoveIt
     arm.max_velocity_scaling_factor = 0.1
     arm.max_acceleration_scaling_factor = 0.1
     arm.planning_time = 15.0 
-    arm.goal_position_tolerance = 0.01
-    arm.goal_orientation_tolerance = 0.05
 
-    # ==========================================================
-    # --- TES DONNÉES DE STRUCTURE (Positions dans le monde) ---
-    # ==========================================================
+    # --- TES DONNÉES DE POSITIONS ---
     robot_X, robot_Y, robot_Z = 0.4, -0.68, 0.89
     cube_world_X, cube_world_Y, cube_world_Z = 0.3, -0.3, 0.91 
     
@@ -56,7 +52,7 @@ def main():
     SIZE_B3 = [0.27, 0.26, 0.15]
     SIZE_TABLE = [1.5, 1.2, 0.001]
 
-    # --- CALCUL DES POSITIONS RELATIVES (Par rapport au robot) ---
+    # CALCUL DES POSITIONS RELATIVES
     TARGET_X = cube_world_X - robot_X   
     TARGET_Y = cube_world_Y - robot_Y   
     TARGET_Z = cube_world_Z - robot_Z   
@@ -66,34 +62,24 @@ def main():
     T3_X, T3_Y, T3_Z = b3_world_X - robot_X, b3_world_Y - robot_Y, 0.15 / 2
 
     CUBE_NAME = "cube_rouge"
-    GRIPPER_OFFSET = 0.17
+    GRIPPER_OFFSET = 0.18 
 
-    # ==========================================================
     # --- MISE EN PLACE DE LA SCÈNE ---
-    # ==========================================================
-    print("Nettoyage et ajout des collisions (RViz)...")
+    print("Nettoyage et ajout des obstacles...")
     for obj in [CUBE_NAME, "box1", "box2", "box3", "table_plan"]:
         arm.remove_collision_object(obj)
     time.sleep(1.0)
 
-    # 1. Ajout de la table
     arm.add_collision_box("table_plan", SIZE_TABLE, "box", [0.0, 0.0, -0.02], [0.0, 0.0, 0.0, 1.0])
-
-    # 2. Ajout des obstacles (box1, 2, 3)
     arm.add_collision_box("box1", SIZE_B1, "box", [T1_X, T1_Y, T1_Z], [0.0, 0.0, 0.0, 1.0])
     arm.add_collision_box("box2", SIZE_B2, "box", [T2_X, T2_Y, T2_Z], [0.0, 0.0, 0.0, 1.0])
     arm.add_collision_box("box3", SIZE_B3, "box", [T3_X, T3_Y, T3_Z], [0.0, 0.0, 0.0, 1.0])
-
-    # 3. Ajout du cube cible
     arm.add_collision_box(CUBE_NAME, [0.06, 0.06, 0.06], "box", [TARGET_X, TARGET_Y, TARGET_Z], [0.0, 0.0, 0.0, 1.0])
-    
     time.sleep(2.0)
 
-    # ==========================================================
     # --- DÉROULÉ DU TEST ---
-    # ==========================================================
 
-    # ÉTAPE 0 : Position Initiale
+    # ÉTAPE 0 : Home
     print("--- ÉTAPE 0 : Home ---")
     arm.move_to_configuration([0.0, -1.57, 1.57, -1.57, -1.57, 0.0])
     arm.wait_until_executed()
@@ -106,22 +92,23 @@ def main():
     pose_target.position.y = TARGET_Y
     pose_target.position.z = TARGET_Z + GRIPPER_OFFSET
     
-    pose_target.orientation.x = 1.0 
+    pose_target.orientation.x = 1.0 # Pince vers le bas
     pose_target.orientation.y = 0.0
     pose_target.orientation.z = 0.0
     pose_target.orientation.w = 0.0
 
-    if arm.move_to_pose(pose_target):
+    success = arm.move_to_pose(pose_target)
+    
+    if success:
         arm.wait_until_executed()
-        print(">>> SUCCÈS : Robot positionné au-dessus du cube !")
+        print(">>> SUCCÈS : Arrivé au dessus du cube !")
     else:
-        print(">>> ARRIVÉ : Le robot est en place (Validation manuelle).")
+        time.sleep(2.0)
+        print(">>> Note : Vérifie Gazebo, le robot a pu bouger malgré l'absence de retour.")
 
-    # --- FIN PROPRE ---
-    print("Fermeture du script...")
-    executor.shutdown()
+    print("Fin du script.")
     node.destroy_node()
     rclpy.shutdown()
-
+    
 if __name__ == "__main__":
     main()
